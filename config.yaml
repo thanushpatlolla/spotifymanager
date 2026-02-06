@@ -1,0 +1,37 @@
+# spotifymanager configuration
+
+lastfm:
+  username: "QCD7"
+
+spotify:
+  # Use Spotify recommendations API (disabled — deprecated for new apps since Nov 2024)
+  spotify_recs: false
+
+playlist:
+  name: "spotifymanager generated"
+  max_size: 30
+  min_freshness: 0.3
+
+scoring:
+  # Weights for combined scoring (Sprint 2)
+  taste_weight: 0.4
+  mood_weight: 0.3
+  freshness_weight: 0.3
+
+discovery:
+  # Max candidates to evaluate per refresh
+  batch_size: 50
+  # Minimum score to include in playlist
+  min_score: 0.5
+
+clustering:
+  # HDBSCAN params (Sprint 5)
+  min_cluster_size: 10
+  min_samples: 5
+
+database:
+  path: "data/spotifymanager.db"
+
+rate_limits:
+  # Last.fm API rate limit (requests per second)
+  lastfm_rps: 4

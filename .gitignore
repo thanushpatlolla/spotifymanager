@@ -1,0 +1,37 @@
+# Environment
+.env
+.venv/
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite3
+
+# Spotify cache
+.cache
+.cache-*
+
+# Data artifacts
+data/*.json
+data/*.csv
+data/faiss_index/*.index
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uv
+uv.lock
