@@ -9,20 +9,29 @@ spotify:
 
 playlist:
   name: "spotifymanager generated"
-  max_size: 30
+  max_size: 100
   min_freshness: 0.3
 
 scoring:
-  # Weights for combined scoring (Sprint 2)
-  taste_weight: 0.4
+  taste_weight: 0.5
   mood_weight: 0.3
-  freshness_weight: 0.3
+  freshness_weight: 0.2
+
+mood:
+  window_hours: 4
+  fallback_top_n: 50
+  decay_factor: 0.85
+  min_tag_count: 2
+  no_tag_default: 0.5
+
+cycling:
+  cycle_fraction: 0.30
+  min_keep: 20
 
 discovery:
-  # Max candidates to evaluate per refresh
   batch_size: 50
-  # Minimum score to include in playlist
   min_score: 0.5
+  slots: 10
 
 clustering:
   # HDBSCAN params (Sprint 5)

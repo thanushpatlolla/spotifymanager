@@ -5,7 +5,7 @@ from rich.console import Console
 from rich.table import Table
 from sqlalchemy import func
 
-from src.data.db import get_session, init_db
+from src.data.db import get_session, init_db, load_env
 from src.data.models import ListenEvent, Song
 
 console = Console()
@@ -78,9 +78,75 @@ def stats():
 
 
 @cli.command()
+def scores():
+    """Show top 20 scored songs (diagnostic)."""
+    from src.features.mood import compute_mood_vector
+    from src.models.scoring import compute_song_scores, compute_taste_score, _compute_p95_plays
+
+    with get_session() as session:
+        mood_vector, vocabulary = compute_mood_vector(session)
+        all_scores = compute_song_scores(session, mood_vector, vocabulary)
+
+        if not all_scores:
+            console.print("[yellow]No songs found to score.[/yellow]")
+            return
+
+        p95 = _compute_p95_plays(session)
+        top_ids = sorted(all_scores, key=all_scores.get, reverse=True)[:20]
+        songs = {
+            s.spotify_id: s
+            for s in session.query(Song).filter(Song.spotify_id.in_(top_ids)).all()
+        }
+
+        table = Table(title="Top 20 Scored Songs")
+        table.add_column("#", justify="right")
+        table.add_column("Song")
+        table.add_column("Artist")
+        table.add_column("Plays", justify="right")
+        table.add_column("Taste", justify="right")
+        table.add_column("Score", justify="right")
+
+        for i, sid in enumerate(top_ids, 1):
+            song = songs.get(sid)
+            if not song:
+                continue
+            taste = compute_taste_score(song, p95)
+            table.add_row(
+                str(i),
+                song.title[:40],
+                song.artist[:25],
+                str(song.total_plays or 0),
+                f"{taste:.3f}",
+                f"{all_scores[sid]:.3f}",
+            )
+
+        console.print(table)
+        console.print(f"\nTotal songs scored: [green]{len(all_scores)}[/green]")
+        if mood_vector:
+            console.print(f"Mood vector dimensions: [green]{len(mood_vector)}[/green]")
+        else:
+            console.print("[yellow]No mood vector (no tags or recent listening)[/yellow]")
+
+
+@cli.command()
 def refresh():
-    """Refresh playlist with current mood and taste (Sprint 3)."""
-    console.print("[yellow]Not yet implemented — coming in Sprint 3.[/yellow]")
+    """Refresh playlist with current mood and taste."""
+    from src.data.spotify_client import get_spotify_client
+    from src.features.listening_stats import update_listening_stats
+    from src.playlists.dynamic import refresh_playlist
+
+    load_env()
+    sp = get_spotify_client()
+
+    with get_session() as session:
+        console.print("[bold]Updating listening stats...[/bold]")
+        update_listening_stats(session)
+
+        console.print("[bold]Refreshing playlist...[/bold]")
+        url = refresh_playlist(session, sp)
+
+        if url:
+            console.print(f"\n[bold green]Done![/bold green] {url}")
 
 
 @cli.command()
