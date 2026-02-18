@@ -1,5 +1,7 @@
 """Click CLI for spotifymanager."""
 
+import asyncio
+
 import click
 from rich.console import Console
 from rich.table import Table
@@ -81,7 +83,7 @@ def stats():
 def scores():
     """Show top 20 scored songs (diagnostic)."""
     from src.features.mood import compute_mood_vector
-    from src.models.scoring import compute_song_scores, compute_taste_score, _compute_p95_plays
+    from src.models.scoring import _compute_p95_plays, compute_song_scores, compute_taste_score
 
     with get_session() as session:
         mood_vector, vocabulary = compute_mood_vector(session)
@@ -150,9 +152,152 @@ def refresh():
 
 
 @cli.command()
-def discover():
-    """Find new music from external sources (Sprint 4)."""
-    console.print("[yellow]Not yet implemented — coming in Sprint 4.[/yellow]")
+@click.option("--limit", default=50, help="Max candidates to fetch per source.")
+def discover(limit):
+    """Find new music from Last.fm and ListenBrainz."""
+    from src.data.lastfm_client import get_lastfm_client
+    from src.models.discovery import (
+        discover_from_lastfm,
+        discover_from_listenbrainz,
+        evaluate_candidates,
+        save_candidates,
+    )
+
+    load_env()
+    network = get_lastfm_client()
+
+    with get_session() as session:
+        console.print("[bold]Discovering from Last.fm...[/bold]")
+        lastfm_candidates = discover_from_lastfm(network, session, limit=limit)
+
+        console.print("[bold]Discovering from ListenBrainz...[/bold]")
+        lb_candidates = discover_from_listenbrainz(session, limit=limit)
+
+        all_candidates = lastfm_candidates + lb_candidates
+        console.print(f"Total raw candidates: {len(all_candidates)}")
+
+        evaluated = evaluate_candidates(session, all_candidates)
+        saved = save_candidates(session, evaluated)
+
+        if evaluated:
+            table = Table(title=f"Top Discovery Candidates ({saved} new)")
+            table.add_column("#", justify="right")
+            table.add_column("Song")
+            table.add_column("Artist")
+            table.add_column("Source")
+            table.add_column("Score", justify="right")
+
+            for i, c in enumerate(evaluated[:20], 1):
+                table.add_row(
+                    str(i),
+                    c["title"][:40],
+                    c["artist"][:25],
+                    c["source"].split(":")[0],
+                    f"{c['score']:.3f}",
+                )
+            console.print(table)
+        else:
+            console.print("[yellow]No candidates met the minimum score threshold.[/yellow]")
+
+
+@cli.command()
+def cluster():
+    """Cluster songs by feature similarity (requires sprint5 deps)."""
+    from src.features.embeddings import build_feature_vectors
+    from src.models.clustering import (
+        assign_clusters,
+        cluster_songs,
+        get_cluster_summary,
+        reduce_dimensions,
+    )
+
+    with get_session() as session:
+        console.print("[bold]Building feature vectors...[/bold]")
+        vectors = build_feature_vectors(session)
+        if not vectors:
+            console.print("[yellow]No songs to cluster.[/yellow]")
+            return
+
+        console.print(f"Built vectors for [green]{len(vectors)}[/green] songs "
+                       f"({len(next(iter(vectors.values())))} dims)")
+
+        console.print("[bold]Reducing dimensions with UMAP...[/bold]")
+        reduced, _ = reduce_dimensions(vectors)
+
+        console.print("[bold]Clustering with HDBSCAN...[/bold]")
+        labels, id_list, _ = cluster_songs(reduced)
+
+        console.print("[bold]Assigning clusters...[/bold]")
+        assign_clusters(session, id_list, labels)
+
+        summaries = get_cluster_summary(session)
+        if summaries:
+            table = Table(title="Song Clusters")
+            table.add_column("ID", justify="right")
+            table.add_column("Name")
+            table.add_column("Songs", justify="right")
+            table.add_column("Top Tags")
+            table.add_column("Top Song")
+
+            for s in summaries:
+                top_song = s["top_songs"][0] if s["top_songs"] else {}
+                table.add_row(
+                    str(s["id"]),
+                    s["name"] or "Unnamed",
+                    str(s["song_count"]),
+                    ", ".join(s["top_tags"][:3]),
+                    f"{top_song.get('artist', '')} — {top_song.get('title', '')}",
+                )
+            console.print(table)
+
+
+@cli.command(name="name-clusters")
+def name_clusters():
+    """Use Claude to name song clusters (requires ANTHROPIC_API_KEY)."""
+    from src.llm.client import get_claude_client
+    from src.llm.cluster_naming import name_all_clusters
+
+    load_env()
+    client = get_claude_client()
+
+    with get_session() as session:
+        named = name_all_clusters(session, client)
+        if named == 0:
+            console.print("[yellow]No unnamed clusters found.[/yellow]")
+
+
+@cli.command()
+def train():
+    """Train the LightGBM taste model (requires sprint5 deps)."""
+    from src.models.taste import prepare_training_data, save_model, train_taste_model
+
+    with get_session() as session:
+        console.print("[bold]Preparing training data...[/bold]")
+        X, y, feature_names = prepare_training_data(session)
+
+        if len(X) == 0:
+            console.print("[yellow]No songs in library to train on.[/yellow]")
+            return
+
+        console.print(f"Training on [green]{len(X)}[/green] songs, "
+                       f"[green]{len(feature_names)}[/green] features")
+        console.print(f"Positive: {int(y.sum())}, Negative: {len(y) - int(y.sum())}")
+
+        model, metrics = train_taste_model(X, y, feature_names)
+        if model:
+            save_model(model)
+            if metrics.get("top_features"):
+                console.print(f"Top features: {', '.join(metrics['top_features'][:5])}")
+
+
+@cli.command()
+def bot():
+    """Start the Discord bot (requires DISCORD_BOT_TOKEN)."""
+    from src.interface.discord_bot import start_bot
+
+    load_env()
+    console.print("[bold]Starting Discord bot...[/bold]")
+    asyncio.run(start_bot())
 
 
 if __name__ == "__main__":
